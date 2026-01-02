@@ -2,6 +2,8 @@ name: alpine-bootstrap-repo
 
 on:
   push:
+    paths:
+      - 'download-packages.txt'
   workflow_dispatch:
 
 permissions:
@@ -24,36 +26,59 @@ jobs:
       # 2. Установка инструментов
       - name: install tools
         run: |
-          apk add --no-cache git apk-tools ca-certificates
+          apk add --no-cache git apk-tools ca-certificates findutils
 
-      # 3. Клонирование самого репо (локально)
+      # 3. Клонирование самого репо (твой рабочий метод)
       - name: clone repo
         run: |
           git clone https://x-access-token:${REPO_TOKEN}@github.com/${GITHUB_REPOSITORY}.git repo
         env:
           REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
 
-      # 4. Fetch пакетов Alpine рекурсивно
-      - name: fetch base packages
+      # 4. Очистка старых пакетов (кроме вложенных папок с кастомными пакетами)
+      - name: clean old packages
         run: |
           mkdir -p repo/x86_64
+          # Удаляем только .apk в корне x86_64, подпапки (напр. repo/x86_64/custom/) не трогаем
+          find repo/x86_64 -maxdepth 1 -name "*.apk" -delete
+          rm -f repo/x86_64/APKINDEX.tar.gz
+
+      # 5. Чтение download-packages.txt и Fetch
+      - name: fetch packages
+        run: |
+          if [ ! -f "repo/download-packages.txt" ]; then
+            echo "Error: download-packages.txt not found!"
+            exit 1
+          fi
+
+          # Извлекаем список пакетов (игнорим комменты и пустые строки)
+          PKGS=$(grep -v '^#' repo/download-packages.txt | xargs)
+          
+          echo "Fetching: $PKGS"
+          
           apk fetch --recursive \
             --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/main \
             --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/community \
             --arch x86_64 \
             --output repo/x86_64 \
-            musl busybox nano
+            $PKGS
+
+      # 6. Генерация индекса (включая кастомные пакеты из подпапок)
+      - name: update index
+        run: |
+          # Индексируем корень и все вложенные пакеты
+          apk index -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk repo/x86_64/*/*.apk 2>/dev/null || \
           apk index -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk
 
-      # 5. Commit & push в main
+      # 7. Commit & push (твой рабочий метод)
       - name: commit & push to main
         run: |
           cd repo
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          git add .
-          git commit -m "update alpine bootstrap repo" || echo "No changes to commit"
+          git add x86_64/
+          git commit -m "update alpine repo: $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git push https://x-access-token:${REPO_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main
         env:
           REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
