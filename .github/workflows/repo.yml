@@ -26,18 +26,19 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: fetch base packages
+      - name: fetch base packages (recursive)
         run: |
           mkdir -p repo/x86_64
           apk fetch \
-  --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/main \
-  --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/community \
-  --arch x86_64 \
-  --output repo/x86_64 \
-  musl \
-  busybox \
-  ncurses-libs \
-  nano
+            --recursive \
+            --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/main \
+            --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/community \
+            --arch x86_64 \
+            --output repo/x86_64 \
+            musl \
+            busybox \
+            nano
+
       - name: generate index
         run: |
           apk index -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk
