@@ -14,19 +14,27 @@ jobs:
       image: alpine:3.23
 
     steps:
+      # 1. Подготовка репозиториев Alpine
       - name: set repositories + update
         run: |
           echo "https://dl-cdn.alpinelinux.org/alpine/v3.23/main" > /etc/apk/repositories
           echo "https://dl-cdn.alpinelinux.org/alpine/v3.23/community" >> /etc/apk/repositories
           apk update
 
+      # 2. Установка инструментов
       - name: install tools
         run: |
           apk add --no-cache git apk-tools ca-certificates
 
-      - uses: actions/checkout@v4
+      # 3. Клонирование самого репо (локально)
+      - name: clone repo
+        run: |
+          git clone https://x-access-token:${REPO_TOKEN}@github.com/${GITHUB_REPOSITORY}.git repo
+        env:
+          REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
 
-      - name: fetch base packages (recursive)
+      # 4. Fetch пакетов Alpine рекурсивно
+      - name: fetch base packages
         run: |
           mkdir -p repo/x86_64
           apk fetch --recursive \
@@ -37,15 +45,15 @@ jobs:
             musl busybox nano
           apk index -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk
 
+      # 5. Commit & push в main
       - name: commit & push to main
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-
-          cp -r repo/* .
+          cd repo
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
 
           git add .
           git commit -m "update alpine bootstrap repo" || echo "No changes to commit"
-          git push origin main
+          git push https://x-access-token:${REPO_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
