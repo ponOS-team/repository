@@ -8,9 +8,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: alpine:3.19
+      image: alpine:3.23
 
     steps:
+      - name: set repositories + update
+        run: |
+          echo "https://dl-cdn.alpinelinux.org/alpine/v3.23/main" > /etc/apk/repositories
+          echo "https://dl-cdn.alpinelinux.org/alpine/v3.23/community" >> /etc/apk/repositories
+          apk update
+
       - name: install tools
         run: |
           apk add --no-cache \
@@ -24,8 +30,8 @@ jobs:
         run: |
           mkdir -p repo/x86_64
           apk fetch \
-            --repository https://dl-cdn.alpinelinux.org/alpine/v3.19/main \
-            --repository https://dl-cdn.alpinelinux.org/alpine/v3.19/community \
+            --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/main \
+            --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/community \
             --arch x86_64 \
             --output repo/x86_64 \
             musl \
