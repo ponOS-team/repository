@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,32 +22,34 @@ jobs:
 
       - name: install tools
         run: |
-          apk add --no-cache \
-            git \
-            apk-tools \
-            ca-certificates
-
-      - uses: actions/checkout@v4
+          apk add --no-cache git apk-tools ca-certificates
 
       - name: fetch base packages (recursive)
         run: |
           mkdir -p repo/x86_64
-          apk fetch \
-            --recursive \
+          apk fetch --recursive \
             --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/main \
             --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/community \
             --arch x86_64 \
             --output repo/x86_64 \
-            musl \
-            busybox \
-            nano
-
-      - name: generate index
-        run: |
+            musl busybox nano
           apk index -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk
 
-      - name: publish
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: repo
+      - name: publish gh-pages (no external actions)
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+          git clone --branch gh-pages \
+            https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git gh-pages \
+            || git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git gh-pages
+
+          rm -rf gh-pages/*
+          cp -r repo/* gh-pages/
+
+          cd gh-pages
+          git add .
+          git commit -m "update alpine bootstrap repo" || exit 0
+          git push origin gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
