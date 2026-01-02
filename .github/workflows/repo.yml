@@ -1,0 +1,36 @@
+name: alpine-bootstrap-repo
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:3.19
+
+    steps:
+      - name: install tools
+        run: |
+          apk add apk-tools ca-certificates
+
+      - name: fetch base packages
+        run: |
+          mkdir -p repo/x86_64
+          apk fetch \
+            --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/main \
+            --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/community \
+            --arch x86_64 \
+            --output repo/x86_64 \
+            musl busybox nano
+
+      - name: generate index
+        run: |
+          apk index -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk
+
+      - name: publish
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: repo
