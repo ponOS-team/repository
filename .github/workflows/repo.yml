@@ -24,6 +24,8 @@ jobs:
         run: |
           apk add --no-cache git apk-tools ca-certificates
 
+      - uses: actions/checkout@v4
+
       - name: fetch base packages (recursive)
         run: |
           mkdir -p repo/x86_64
@@ -35,21 +37,15 @@ jobs:
             musl busybox nano
           apk index -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk
 
-      - name: publish gh-pages (no external actions)
+      - name: commit & push to main
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
 
-          git clone --branch gh-pages \
-            https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git gh-pages \
-            || git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git gh-pages
+          cp -r repo/* .
 
-          rm -rf gh-pages/*
-          cp -r repo/* gh-pages/
-
-          cd gh-pages
           git add .
-          git commit -m "update alpine bootstrap repo" || exit 0
-          git push origin gh-pages
+          git commit -m "update alpine bootstrap repo" || echo "No changes to commit"
+          git push origin main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
