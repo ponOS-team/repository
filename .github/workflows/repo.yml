@@ -16,6 +16,10 @@ jobs:
       image: alpine:3.23
 
     steps:
+      - name: setup shell
+        run: |
+          set -euxo pipefail
+
       # 1. Подготовка репозиториев Alpine
       - name: set repositories + update
         run: |
@@ -26,57 +30,69 @@ jobs:
       # 2. Установка инструментов
       - name: install tools
         run: |
-          apk add --no-cache git apk-tools ca-certificates findutils
+          apk add --no-cache git apk-tools ca-certificates findutils bash
 
-      # 3. Клонирование самого репо (твой рабочий метод)
+      # 3. Клонирование репо
       - name: clone repo
         run: |
           git clone https://x-access-token:${REPO_TOKEN}@github.com/${GITHUB_REPOSITORY}.git repo
         env:
           REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
 
-      # 4. Очистка старых пакетов (кроме вложенных папок с кастомными пакетами)
-      - name: clean old packages
+      # 4. Подготовка директории (не трогаем подпапку custom)
+      - name: prepare repo dirs
         run: |
           mkdir -p repo/x86_64
-          # Удаляем только .apk в корне x86_64, подпапки (напр. repo/x86_64/custom/) не трогаем
-          find repo/x86_64 -maxdepth 1 -name "*.apk" -delete
-          rm -f repo/x86_64/APKINDEX.tar.gz
+          # Не удаляем подпапки (например repo/x86_64/custom). Удаляем только .apk в корне x86_64 (если нужно).
+          find repo/x86_64 -maxdepth 1 -type f -name "*.apk" -print0 | xargs -0 -r rm -f
+          rm -f repo/x86_64/APKINDEX.tar.gz || true
 
-      # 5. Чтение download-packages.txt и Fetch
+      # 5. Чтение download-packages.txt и Fetch (без перезаписи уже существующих файлов)
       - name: fetch packages
         run: |
           if [ ! -f "repo/download-packages.txt" ]; then
-            echo "Error: download-packages.txt not found!"
+            echo "Error: repo/download-packages.txt not found!"
             exit 1
           fi
 
-          # Извлекаем список пакетов (игнорим комменты и пустые строки)
-          PKGS=$(grep -v '^#' repo/download-packages.txt | xargs)
-          
-          echo "Fetching: $PKGS"
-          
+          # Список пакетов (игнорируем комментарии и пустые строки)
+          PKGS=$(grep -v '^\s*#' repo/download-packages.txt | sed '/^\s*$/d' | xargs || true)
+          if [ -z "$PKGS" ]; then
+            echo "No packages listed in download-packages.txt"
+            exit 0
+          fi
+
+          echo "Requested packages: $PKGS"
+
+          # apk fetch с --no-overwrite: существующие файлы не будут перезаписаны.
           apk fetch --recursive \
+            --no-overwrite \
             --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/main \
             --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/community \
             --arch x86_64 \
             --output repo/x86_64 \
             $PKGS
 
-      # 6. Генерация индекса (включая кастомные пакеты из подпапок)
+      # 6. Генерация индекса (включая кастомные пакеты в подпапках)
       - name: update index
         run: |
-          # Индексируем корень и все вложенные пакеты
-          apk index -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk repo/x86_64/*/*.apk 2>/dev/null || \
-          apk index -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk
+          # Собираем все .apk в дереве x86_64 (включая подпапки) и индексируем
+          set +e
+          APKLIST=$(find repo/x86_64 -type f -name '*.apk' -print0 | xargs -0 echo || true)
+          set -e
+          if [ -z "$APKLIST" ]; then
+            echo "No .apk files found to index"
+            exit 0
+          fi
+          # apk index принимает список файлов; используем find чтобы подставить все пути
+          apk index -o repo/x86_64/APKINDEX.tar.gz $(find repo/x86_64 -type f -name '*.apk')
 
-      # 7. Commit & push (твой рабочий метод)
+      # 7. Commit & push
       - name: commit & push to main
         run: |
           cd repo
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-
           git add x86_64/
           git commit -m "update alpine repo: $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git push https://x-access-token:${REPO_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main
