@@ -55,7 +55,6 @@ jobs:
           fi
 
           apk fetch --recursive \
-            --no-overwrite \
             --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/main \
             --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/community \
             --arch x86_64 \
