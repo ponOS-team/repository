@@ -92,7 +92,7 @@ jobs:
       # 8. Generate index (ROOT ONLY)
       - name: update index
         run: |
-          apk index -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk
+          apk index --allow-untrusted -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk
 
       # 9. Commit & push
       - name: commit & push
