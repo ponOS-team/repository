@@ -16,55 +16,44 @@ jobs:
       image: alpine:3.23
 
     steps:
-      - name: setup shell
+      - name: strict shell
         run: |
           set -euxo pipefail
 
-      # 1. Подготовка репозиториев Alpine
+      # 1. Alpine repos
       - name: set repositories + update
         run: |
           echo "https://dl-cdn.alpinelinux.org/alpine/v3.23/main" > /etc/apk/repositories
           echo "https://dl-cdn.alpinelinux.org/alpine/v3.23/community" >> /etc/apk/repositories
           apk update
 
-      # 2. Установка инструментов
+      # 2. Tools
       - name: install tools
         run: |
           apk add --no-cache git apk-tools ca-certificates findutils bash
 
-      # 3. Клонирование репо
+      # 3. Clone repo
       - name: clone repo
         run: |
           git clone https://x-access-token:${REPO_TOKEN}@github.com/${GITHUB_REPOSITORY}.git repo
         env:
           REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
 
-      # 4. Подготовка директории (не трогаем подпапку custom)
+      # 4. Prepare dirs (НЕ ТРОГАЕМ custom)
       - name: prepare repo dirs
         run: |
           mkdir -p repo/x86_64
-          # Не удаляем подпапки (например repo/x86_64/custom). Удаляем только .apk в корне x86_64 (если нужно).
-          find repo/x86_64 -maxdepth 1 -type f -name "*.apk" -print0 | xargs -0 -r rm -f
           rm -f repo/x86_64/APKINDEX.tar.gz || true
 
-      # 5. Чтение download-packages.txt и Fetch (без перезаписи уже существующих файлов)
+      # 5. Fetch packages (NO overwrite)
       - name: fetch packages
         run: |
-          if [ ! -f "repo/download-packages.txt" ]; then
-            echo "Error: repo/download-packages.txt not found!"
-            exit 1
-          fi
-
-          # Список пакетов (игнорируем комментарии и пустые строки)
           PKGS=$(grep -v '^\s*#' repo/download-packages.txt | sed '/^\s*$/d' | xargs || true)
           if [ -z "$PKGS" ]; then
-            echo "No packages listed in download-packages.txt"
+            echo "download-packages.txt empty"
             exit 0
           fi
 
-          echo "Requested packages: $PKGS"
-
-          # apk fetch с --no-overwrite: существующие файлы не будут перезаписаны.
           apk fetch --recursive \
             --no-overwrite \
             --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/main \
@@ -73,28 +62,47 @@ jobs:
             --output repo/x86_64 \
             $PKGS
 
-      # 6. Генерация индекса (включая кастомные пакеты в подпапках)
+      # 6. Copy custom/*.apk → root (NO duplicates)
+      - name: copy custom packages
+        run: |
+          if [ -d repo/x86_64/custom ]; then
+            for f in repo/x86_64/custom/*.apk; do
+              [ -e "$f" ] || continue
+              base="$(basename "$f")"
+              if [ ! -f "repo/x86_64/$base" ]; then
+                cp -v "$f" repo/x86_64/
+              fi
+            done
+          fi
+
+      # 7. Remove duplicates (same pkgname, keep newest)
+      - name: deduplicate packages
+        run: |
+          cd repo/x86_64
+          for pkg in *.apk; do
+            name="${pkg%%-[0-9]*}"
+            matches=$(ls ${name}-*.apk 2>/dev/null || true)
+            if [ "$(echo "$matches" | wc -l)" -gt 1 ]; then
+              keep=$(echo "$matches" | sort -V | tail -n1)
+              for m in $matches; do
+                [ "$m" = "$keep" ] || rm -f "$m"
+              done
+            fi
+          done
+
+      # 8. Generate index (ROOT ONLY)
       - name: update index
         run: |
-          # Собираем все .apk в дереве x86_64 (включая подпапки) и индексируем
-          set +e
-          APKLIST=$(find repo/x86_64 -type f -name '*.apk' -print0 | xargs -0 echo || true)
-          set -e
-          if [ -z "$APKLIST" ]; then
-            echo "No .apk files found to index"
-            exit 0
-          fi
-          # apk index принимает список файлов; используем find чтобы подставить все пути
-          apk index -o repo/x86_64/APKINDEX.tar.gz $(find repo/x86_64 -type f -name '*.apk')
+          apk index -o repo/x86_64/APKINDEX.tar.gz repo/x86_64/*.apk
 
-      # 7. Commit & push
-      - name: commit & push to main
+      # 9. Commit & push
+      - name: commit & push
         run: |
           cd repo
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add x86_64/
-          git commit -m "update alpine repo: $(date +'%Y-%m-%d')" || echo "No changes to commit"
+          git commit -m "update alpine repo: $(date +'%Y-%m-%d')" || echo "no changes"
           git push https://x-access-token:${REPO_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main
         env:
           REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
