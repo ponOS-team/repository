@@ -1,5 +1,0 @@
-nano
-busybox
-nano
-ncurses
-ncurses-terminfo-base
